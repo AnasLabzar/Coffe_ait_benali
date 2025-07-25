@@ -1,9 +1,10 @@
 const Product = require('../models/Product');
 const mongoose = require('mongoose');
+const { deleteImage } = require('../middlewares/imageUpload'); // ADD THIS
 
-
-// Helper: Handle image upload
-const handleImageUpload = (req, existingProduct = null) => {
+// FIXED Helper: Handle image upload
+// utils/handleImageUpload.js or in controller file
+const handleImageUpload = async (req, existingProduct = null) => {
     let imageUrl = '';
     let imagePublicId = '';
 
@@ -11,18 +12,23 @@ const handleImageUpload = (req, existingProduct = null) => {
         imageUrl = req.file.path;
         imagePublicId = req.file.filename;
 
-        // Delete old image if exists
-        if (existingProduct && existingProduct.imagePublicId) {
-            deleteImage(existingProduct.imagePublicId);
+        if (existingProduct?.imagePublicId) {
+            await deleteImage(existingProduct.imagePublicId);
         }
+
+    } else if (req.body.imageUrl && req.body.imagePublicId) {
+        imageUrl = req.body.imageUrl;
+        imagePublicId = req.body.imagePublicId;
+
     } else if (existingProduct) {
-        // Keep existing image if not updated
         imageUrl = existingProduct.imageUrl;
         imagePublicId = existingProduct.imagePublicId;
     }
 
     return { imageUrl, imagePublicId };
 };
+
+
 
 // @desc    Create global product category
 // @route   POST /api/products/global
@@ -32,7 +38,7 @@ exports.createGlobalProduct = async (req, res) => {
         const { nomGlobal } = req.body;
 
         // Handle image upload
-        const { imageUrl, imagePublicId } = handleImageUpload(req);
+        const { imageUrl, imagePublicId } = await handleImageUpload(req);
 
         // Check if global product exists
         const existingProduct = await Product.findOne({ nomGlobal, type: 'global' });
@@ -55,6 +61,8 @@ exports.createGlobalProduct = async (req, res) => {
     }
 };
 
+// controllers/productController.js
+
 // @desc    Create local product variant
 // @route   POST /api/products/local
 // @access  Admin/Gerant
@@ -76,8 +84,30 @@ exports.createLocalProduct = async (req, res) => {
             nomGlobal,
             type: 'global'
         });
+
         if (!globalProduct) {
-            return res.status(404).json({ msg: 'Global product not found' });
+            return res.status(404).json({
+                msg: 'Global product not found',
+                solution: 'First create the global product category'
+            });
+        }
+
+        // Check if local variant already exists
+        const existingVariant = await Product.findOne({
+            nomGlobal,
+            nomLocal,
+            type: 'local'
+        });
+
+        if (existingVariant) {
+            return res.status(400).json({
+                msg: 'Product variant already exists',
+                existingProduct: {
+                    id: existingVariant._id,
+                    nomLocal: existingVariant.nomLocal,
+                    prixMatin: existingVariant.prixMatin
+                }
+            });
         }
 
         const product = new Product({
@@ -86,13 +116,24 @@ exports.createLocalProduct = async (req, res) => {
             prixMatin: prixMatin || 0,
             prixSoir: prixSoir || prixMatin || 0,
             stock: stock || 0,
-            type: 'local',
+            type: 'local',  // Fixed: Must be 'local' for variants
             imageUrl,
             imagePublicId
         });
 
         await product.save();
-        res.status(201).json(product);
+
+        // Return the complete product hierarchy
+        const updatedGlobal = await Product.findOne({
+            nomGlobal,
+            type: 'global'
+        });
+
+        res.status(201).json({
+            msg: 'Product variant created successfully',
+            globalProduct: updatedGlobal,
+            newVariant: product
+        });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server error');
@@ -104,37 +145,37 @@ exports.createLocalProduct = async (req, res) => {
 // @access  Admin/Gerant
 exports.updateProduct = async (req, res) => {
     try {
-      const { 
-        nomLocal,
-        prixMatin,
-        prixSoir,
-        stock
-      } = req.body;
-  
-      const product = await Product.findById(req.params.id);
-      if (!product) {
-        return res.status(404).json({ msg: 'Product not found' });
-      }
-  
-      // Handle image upload
-      const { imageUrl, imagePublicId } = handleImageUpload(req, product);
-      
-      // Update fields
-      if (nomLocal && product.type === 'local') product.nomLocal = nomLocal;
-      if (prixMatin && product.type === 'local') product.prixMatin = prixMatin;
-      if (prixSoir && product.type === 'local') product.prixSoir = prixSoir;
-      if (stock !== undefined && product.type === 'local') product.stock = stock;
-      
-      product.imageUrl = imageUrl;
-      product.imagePublicId = imagePublicId;
-  
-      await product.save();
-      res.json(product);
+        const {
+            nomLocal,
+            prixMatin,
+            prixSoir,
+            stock
+        } = req.body;
+
+        const product = await Product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ msg: 'Product not found' });
+        }
+
+        // FIXED: Add await and pass existing product
+        const { imageUrl, imagePublicId } = await handleImageUpload(req, product);
+
+        // Update fields
+        if (nomLocal && product.type === 'local') product.nomLocal = nomLocal;
+        if (prixMatin && product.type === 'local') product.prixMatin = prixMatin;
+        if (prixSoir && product.type === 'local') product.prixSoir = prixSoir;
+        if (stock !== undefined && product.type === 'local') product.stock = stock;
+
+        product.imageUrl = imageUrl;
+        product.imagePublicId = imagePublicId;
+
+        await product.save();
+        res.json(product);
     } catch (err) {
-      console.error(err.message);
-      res.status(500).send('Server error');
+        console.error(err.message);
+        res.status(500).send('Server error');
     }
-  };
+};
 
 // @desc    Get all products
 // @route   GET /api/products
@@ -215,33 +256,33 @@ exports.updateStock = async (req, res) => {
 // @access  Admin
 exports.deleteProduct = async (req, res) => {
     try {
-      const product = await Product.findById(req.params.id);
-      if (!product) {
-        return res.status(404).json({ msg: 'Product not found' });
-      }
-  
-      // Delete associated image
-      if (product.imagePublicId) {
-        await deleteImage(product.imagePublicId);
-      }
-  
-      // Prevent deletion if product has variants
-      if (product.type === 'global') {
-        const hasVariants = await Product.exists({ 
-          nomGlobal: product.nomGlobal,
-          type: 'local'
-        });
-        if (hasVariants) {
-          return res.status(400).json({ 
-            msg: 'Cannot delete global product with existing variants' 
-          });
+        const product = await Product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ msg: 'Product not found' });
         }
-      }
-  
-      await product.remove();
-      res.json({ msg: 'Product removed' });
+
+        // Delete associated image
+        if (product.imagePublicId) {
+            await deleteImage(product.imagePublicId);
+        }
+
+        // Prevent deletion if product has variants
+        if (product.type === 'global') {
+            const hasVariants = await Product.exists({
+                nomGlobal: product.nomGlobal,
+                type: 'local'
+            });
+            if (hasVariants) {
+                return res.status(400).json({
+                    msg: 'Cannot delete global product with existing variants'
+                });
+            }
+        }
+
+        await product.remove();
+        res.json({ msg: 'Product removed' });
     } catch (err) {
-      console.error(err.message);
-      res.status(500).send('Server error');
+        console.error(err.message);
+        res.status(500).send('Server error');
     }
-  };
+};

@@ -9,20 +9,28 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Configure storage
-const storage = new CloudinaryStorage({
+// Create storage instances
+const productStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'cafe_products',
     allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
     transformation: [{ width: 500, height: 500, crop: 'limit' }]
-  },
+  }
 });
 
-const upload = multer({ storage: storage });
+const logoStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'cafe_logos',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'svg'],
+    transformation: [{ width: 300, height: 300, crop: 'limit' }]
+  }
+});
 
-// Handle single image upload
-exports.uploadProductImage = upload.single('image');
+// Create upload instances
+exports.uploadProductImage = multer({ storage: productStorage }).single('image');
+exports.uploadLogo = multer({ storage: logoStorage }).single('logo');
 
 // Delete image from Cloudinary
 exports.deleteImage = async (publicId) => {

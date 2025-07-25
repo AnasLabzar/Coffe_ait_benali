@@ -16,7 +16,7 @@ const { uploadProductImage } = require('../middlewares/imageUpload');
 router.get('/', getProducts);
 router.get('/:id', getProductById);
 
-// Protected routes with image upload support
+// Use the middleware directly
 router.post(
   '/global', 
   authenticate(['Admin', 'Gerant']), 
@@ -25,18 +25,19 @@ router.post(
 );
 
 router.post(
-  '/local', 
-  authenticate(['Admin', 'Gerant']), 
-  uploadProductImage,
+  '/local',
+  authenticate(['Admin', 'Gerant']),
   createLocalProduct
 );
 
+// Keep only this router setup:
 router.put(
   '/:id', 
   authenticate(['Admin', 'Gerant']), 
-  uploadProductImage,
+  uploadProductImage, // This is the middleware from imageUpload.js
   updateProduct
 );
+
 
 // Protected routes without image upload
 router.put('/stock/:id', authenticate(['Admin', 'Gerant']), updateStock);
